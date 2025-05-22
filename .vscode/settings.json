@@ -1,5 +1,12 @@
 {
     "files.associations": {
         "iosfwd": "cpp"
-    }
+    },
+    "makefile.launchConfigurations": [
+        {
+            "cwd": "/home/shaked/Projects/ComputerArchitectureHW2",
+            "binaryPath": "/home/shaked/Projects/ComputerArchitectureHW2/cacheSim",
+            "binaryArgs": []
+        }
+    ]
 }
