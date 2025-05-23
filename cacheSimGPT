@@ -1,0 +1,176 @@
+/******************************************************************************
+ * ChatGPT's Code
+ *****************************************************************************/
+#include <cstdlib>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <cstdint>
+#include <vector>
+#include <limits>
+
+using std::cerr;
+using std::endl;
+using std::ifstream;
+
+unsigned int gMemAccessTime = 0;
+bool gWriteAllocate = false;
+
+static inline unsigned int log2_u(unsigned int x) {
+    unsigned int r = 0;
+    while (x > 1) { x >>= 1; ++r; }
+    return r;
+}
+
+static inline uint32_t get_bits(uint32_t v, unsigned lo, unsigned hi) {
+    uint32_t mask = ((uint64_t)1 << (hi - lo + 1)) - 1;
+    return (v >> lo) & mask;
+}
+
+struct Block {
+    uint32_t tag = 0;
+    bool valid = false;
+    bool dirty = false;
+    unsigned long timeStamp = 0;
+};
+
+class Cache {
+public:
+    Cache(unsigned sizeBytes, unsigned blockBytes, unsigned assocExp, unsigned accessCycles)
+      : blockSize(blockBytes), accessTime(accessCycles) {
+        numBlocks = sizeBytes / blockSize;
+        // assocExp is number of ways directly (0 -> direct-mapped)
+        numWays = (assocExp == 0 ? 1 : assocExp);
+        if (numWays > numBlocks) numWays = numBlocks;
+        numSets = (numWays > 0 ? numBlocks / numWays : 0);
+        offsetBits = log2_u(blockSize);
+        indexBits = (numSets > 1 ? log2_u(numSets) : 0);
+        sets.assign(numSets, std::vector<Block>(numWays));
+    }
+
+    bool access(uint32_t addr, char op, unsigned long currTime) {
+        unsigned idx = indexBits ? get_bits(addr, offsetBits, offsetBits + indexBits - 1) : 0;
+        uint32_t tag = addr >> (offsetBits + indexBits);
+        for (auto &blk : sets[idx]) {
+            if (blk.valid && blk.tag == tag) {
+                blk.timeStamp = currTime;
+                if (op == 'w') blk.dirty = true;
+                accCount++;
+                return true;
+            }
+        }
+        missCount++;
+        accCount++;
+        return false;
+    }
+
+    uint32_t fill(uint32_t addr, unsigned long currTime, bool toDirty = false) {
+        unsigned idx = indexBits ? get_bits(addr, offsetBits, offsetBits + indexBits - 1) : 0;
+        uint32_t tag = addr >> (offsetBits + indexBits);
+        for (auto &blk : sets[idx]) {
+            if (!blk.valid) {
+                blk.valid = true;
+                blk.tag = tag;
+                blk.timeStamp = currTime;
+                blk.dirty = toDirty;
+                return UINT32_MAX;
+            }
+        }
+        auto *lru = &sets[idx][0];
+        for (auto &blk : sets[idx])
+            if (blk.timeStamp < lru->timeStamp)
+                lru = &blk;
+        bool wasDirty = lru->dirty;
+        uint32_t evictAddr = ((lru->tag << indexBits) | idx) << offsetBits;
+        lru->tag = tag;
+        lru->timeStamp = currTime;
+        lru->dirty = toDirty;
+        return wasDirty ? evictAddr : UINT32_MAX;
+    }
+
+    unsigned getAccessCount() const { return accCount; }
+    unsigned getMissCount()   const { return missCount; }
+    unsigned getAccessTime()  const { return accessTime; }
+
+private:
+    unsigned blockSize, numBlocks, numWays, numSets;
+    unsigned offsetBits, indexBits;
+    unsigned accessTime;
+    unsigned accCount = 0, missCount = 0;
+    std::vector<std::vector<Block>> sets;
+};
+
+class TwoLevelCache {
+public:
+    TwoLevelCache(unsigned B, unsigned L1Sz, unsigned L1Assoc, unsigned L1cyc,
+                  unsigned L2Sz, unsigned L2Assoc, unsigned L2cyc)
+      : l1(L1Sz, B, L1Assoc, L1cyc), l2(L2Sz, B, L2Assoc, L2cyc) {}
+
+    void access(uint32_t addr, char op) {
+        totalAccesses++;
+        currTime += l1.getAccessTime();
+        if (l1.access(addr, op, currTime)) return;
+        currTime += l2.getAccessTime();
+        if (l2.access(addr, op, currTime)) {
+            if (op=='r' || gWriteAllocate)
+                l1.fill(addr, currTime, op=='w');
+            return;
+        }
+        currTime += gMemAccessTime;
+        if (op=='r' || gWriteAllocate) {
+            uint32_t ev2 = l2.fill(addr, currTime, op=='w');
+            // if (ev2 != UINT32_MAX) ;
+            l1.fill(addr, currTime, op=='w');
+        }
+    }
+
+    unsigned totalAccesses = 0;
+    unsigned long currTime = 0;
+    Cache l1, l2;
+};
+
+int main(int argc, char** argv) {
+    if (argc < 15) {
+        cerr << "Usage: ./cacheSim <trace> --mem-cyc N --bsize b --wr-alloc 0/1 \
+                --l1-size s --l1-assoc a --l1-cyc c \
+                --l2-size s --l2-assoc a --l2-cyc c" << endl;
+        return 1;
+    }
+    const char* filename = argv[1];
+    unsigned Bexp=0, L1exp=0, L2exp=0;
+    unsigned wr=0, l1a=0, l1c=0, l2a=0, l2c=0;
+    for (int i=2; i<argc; i+=2) {
+        std::string opt(argv[i]); int v = std::atoi(argv[i+1]);
+        if (opt=="--mem-cyc") gMemAccessTime = v;
+        else if (opt=="--bsize") Bexp=v;
+        else if (opt=="--wr-alloc") wr=v;
+        else if (opt=="--l1-size") L1exp=v;
+        else if (opt=="--l1-assoc") l1a=v;
+        else if (opt=="--l1-cyc") l1c=v;
+        else if (opt=="--l2-size") L2exp=v;
+        else if (opt=="--l2-assoc") l2a=v;
+        else if (opt=="--l2-cyc") l2c=v;
+    }
+    gWriteAllocate = wr;
+    unsigned B = 1u<<Bexp;
+    unsigned L1S = 1u<<L1exp;
+    unsigned L2S = 1u<<L2exp;
+    TwoLevelCache cache(B, L1S, l1a, l1c, L2S, l2a, l2c);
+
+    ifstream file(filename);
+    if (!file) { cerr<<"Cannot open trace file"<<std::endl; return 1; }
+    std::string line;
+    while (std::getline(file, line)) {
+        char op; std::string addr;
+        std::stringstream ss(line); ss>>op>>addr;
+        uint32_t a = std::stoul(addr.substr(2), nullptr, 16);
+        cache.access(a, op);
+    }
+    unsigned l1acc = cache.l1.getAccessCount();
+    unsigned l2acc = cache.l2.getAccessCount();
+    double l1miss = l1acc ? double(cache.l1.getMissCount())/l1acc : 0.0;
+    double l2miss = l2acc ? double(cache.l2.getMissCount())/l2acc : 0.0;
+    double atime = double(cache.currTime)/cache.totalAccesses;
+    printf("L1miss=%.3f L2miss=%.3f AccTimeAvg=%.3f\n", l1miss, l2miss, atime);
+    return 0;
+}

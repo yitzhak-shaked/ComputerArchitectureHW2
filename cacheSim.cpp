@@ -40,8 +40,8 @@ bool gWriteAllocate = false;  	  // Write-Allocate mode
 /******************************************************************************
  * Helper Functions
  *****************************************************************************/
- int log2(int x) {
-	int log = 0;
+inline unsigned int log2_u(unsigned int x) {
+	unsigned int log = 0;
 	while (x > 1) {
 		x >>= 1;
 		log++;
@@ -49,29 +49,28 @@ bool gWriteAllocate = false;  	  // Write-Allocate mode
 	return log;
 }
 
-int power(int base, int exp) {
-	int result = 1;
-	for (int i = 0; i < exp; ++i) {
-		result *= base;
-	}
-	return result;
-}
+// int power(int base, int exp) {
+// 	int result = 1;
+// 	for (int i = 0; i < exp; ++i) {
+// 		result *= base;
+// 	}
+// 	return result;
+// }
 
 uint32_t dec_to_bin(uint32_t dec) {
-	uint32_t bin = 0;
-	int i = 1;
-	while (dec > 0) {
-		bin += (dec % 2) * i;
-		dec /= 2;
-		i *= 10;
-	}
-	return bin;
+    // This function is not needed for address handling, but if you want a binary representation as an integer,
+    // it will only work for small numbers. For display, use std::bitset instead.
+    return dec; // Just return the value, as bitwise operations work on the integer itself.
 }
 
-uint32_t get_bits(uint32_t value, unsigned start, unsigned end) {
+/** Deprecated
+ * This function is not used in the code, but it was part of the original code.
+ * It is kept here for reference, but it is not needed for the current implementation.
+ 
+uint32_t _get_bits(uint32_t value, unsigned start, unsigned end) {
 	// Get bits from start to end (inclusive)
 	if (start > end || start < 0 || end >= 32) {
-		cerr << "Error: get_bits recieved an invalid bit range" << endl;
+		// cerr << "Error: get_bits recieved an invalid bit range" << endl;
 		return 0;
 	}
 	uint32_t mask;
@@ -80,21 +79,48 @@ uint32_t get_bits(uint32_t value, unsigned start, unsigned end) {
 
 	return (value & mask) >> start;
 }
+*/
 
-int parseAddress(uint32_t address, unsigned int blockSize, unsigned int numSets,
+inline uint32_t get_bits(uint32_t v, unsigned lo, unsigned hi) {
+    uint32_t mask = ((uint64_t)1 << (hi - lo + 1)) - 1;
+    return (v >> lo) & mask;
+}
+
+int parse_address(uint32_t address, unsigned int blockSize, unsigned int numSets,
 				 uint32_t &tag, uint32_t &setIndex, uint32_t &blockOffset) {
+	
 	/** Address Structure:
-	 * [1 .. 0]														: 00
-	 * [<2+log2(blockSize)-1> .. 2]									: Block offset
-	 * [<2+log2(blockSize)-1+log2(numSets)-1 .. <2+log2(blockSize)>]: Set index
-	 * [31 .. <2+log2(blockSize)+log2(numSets)-1>]					: Tag
+	 * [<log2(blockSize)-1> .. 0]									: Block offset
+	 * [<log2(blockSize)+log2(numSets)-1 .. <log2(blockSize)>]		: Set index
+	 * [31 .. <log2(blockSize)+log2(numSets)-1>]					: Tag
+	 */
+
+	/** NOTE: Mistake 2 - the original code falsey assumed that the 00 prefix is not part of the block offset. */
+	/** Address Structure:
+	 * [1 .. 0]															: 00 !!!!!!!!!!!!!!!!!!!!!!!!!
+	 * [<2+log2(blockSize)-1> .. 2]										: Block offset
+	 * [<2+log2(blockSize)+log2(numSets)-1 .. <2+log2(blockSize)>]		: Set index
+	 * [31 .. <2+log2(blockSize)+log2(numSets)-1>]						: Tag
 	 */
 	
-	unsigned leftIdxOffset = 1 + log2(blockSize);
-	unsigned leftIdxSets = leftIdxOffset + log2(numSets);
+	unsigned leftIdxOffset = log2_u(blockSize) - 1;
+	unsigned leftIdxSets = leftIdxOffset + log2_u(numSets);
 	unsigned leftIdxTag = 31;
 	
-	blockOffset = get_bits(address, 2, leftIdxOffset);
+	// Handling edge cases
+	if (numSets == 0) {
+		// No sets
+		cerr << "Error: Number of sets cannot be 0" << endl;
+		return 1;
+	} else if (numSets == 1) {
+		// Only one set, so all bits after the block offset are the tag
+		blockOffset = get_bits(address, 0, leftIdxOffset);
+		setIndex = 0;
+		tag = get_bits(address, leftIdxOffset + 1, leftIdxTag);
+		return 0;
+	}
+	
+	// blockOffset = get_bits(address, 2, leftIdxOffset);
 	setIndex = get_bits(address, leftIdxOffset + 1, leftIdxSets);
 	tag = get_bits(address, leftIdxSets + 1, leftIdxTag);
 
@@ -102,52 +128,15 @@ int parseAddress(uint32_t address, unsigned int blockSize, unsigned int numSets,
 }
 
 /******************************************************************************
- * Classes
+ * Classes & Structs
  *****************************************************************************/
-//  ~ ~ ~ Block class ~ ~ ~
-class Block {
-private:
-	// Block parameters
-	uint32_t tag;
-	uint32_t blockAddress;
-	unsigned long int timeStamp;  // For LRU replacement policy
-	bool dirtyBit;
-	bool validBit;
-	
-public:
-	Block(uint32_t tag = 0, uint32_t blockAddress = 0, unsigned long int timeStamp = 0,
-			bool dirtyBit = false, bool validBit = false) :
-			tag(tag), blockAddress(blockAddress), timeStamp(timeStamp),
-			dirtyBit(dirtyBit), validBit(validBit) {}
-
-	~Block() {}
-
-	// = Operator
-	Block& operator=(const Block& other) {
-		if (this != &other) {
-			tag = other.tag;
-			blockAddress = other.blockAddress;
-			timeStamp = other.timeStamp;
-			dirtyBit = other.dirtyBit;
-			validBit = other.validBit;
-		}
-		return *this;
-	}
-
-	// Getters & Setters
-	uint32_t getTag() { return tag; }
-	uint32_t getBlockAddress() { return blockAddress; }
-	unsigned long int getTimeStamp() { return timeStamp; }
-	bool isDirty() { return dirtyBit; }
-	bool isValid() { return validBit; }
-	void setTag(uint32_t tag) { this->tag = tag; }
-	void setBlockAddress(uint32_t blockAddress) { this->blockAddress = blockAddress; }
-	void setTimeStamp(unsigned long int timeStamp) { this->timeStamp = timeStamp; }
-	void setDirty(bool dirty) { this->dirtyBit = dirty; }
-	void setValid(bool valid) { this->validBit = valid; }
-
-	// Functions
-
+// ~ ~ ~ Block struct ~ ~ ~
+struct Block {
+    uint32_t tag = 0;
+	uint32_t address = 0;
+    bool valid = false;
+    bool dirty = false;
+    unsigned long timeStamp = 0;
 };
 
 // ~ ~ ~ Cache Way ~ ~ ~
@@ -167,7 +156,7 @@ public:
 	}
 
 	Block& getBlock(int index) { return blocks[index]; }
-	unsigned int getNumBlocks() { return numBlocks; }
+	unsigned int getNumBlocks() const { return numBlocks; }
 	
 };
 
@@ -177,127 +166,132 @@ private:
 	// Cache parameters
 	unsigned int size;
 	unsigned int blockSize;
-	unsigned int associativity;
 	unsigned int numBlocks;
 	unsigned int numWays;
 	unsigned int numSets;
-	unsigned int missCount;
 	unsigned int accCount;
-	int accessTime;
+	unsigned int missCount;
 	CacheWay **pWayArr;
 
 public:
-	Cache(unsigned long int size, unsigned long int blockSize, unsigned long int associativity) : 
-			size(size), blockSize(blockSize), associativity(associativity), missCount(0), accCount(0) {
+	Cache(unsigned int size, unsigned int blockSize, unsigned int numWays) : 
+			size(size), blockSize(blockSize), numWays(numWays), accCount(0), missCount(0) {
 		// Initialize parameters
 		numBlocks = size / blockSize;
-		numWays = power(2, associativity);
-		numSets = numBlocks / numWays;
+		numSets   = numBlocks / numWays;
 
-		pWayArr = new CacheWay*[numSets];
-		for (unsigned int i = 0; i < numSets; ++i) {
-			pWayArr[i] = new CacheWay(numWays);
+		pWayArr = new CacheWay*[numWays];
+		for (unsigned int i = 0; i < numWays; ++i) {
+			pWayArr[i] = new CacheWay(numSets);
 		}
 	}
 
 	~Cache() {
-		for (unsigned int i = 0; i < numSets; ++i) {
+		for (unsigned int i = 0; i < numWays; ++i) {
 			delete pWayArr[i];
 		}
 		delete[] pWayArr;
 	}
 	
 	// Getters & Setters
-	unsigned int getAccessTime() { return accessTime; }
-	unsigned int getMissCount() { return missCount; }
-	unsigned int getAccCount() { return accCount; }
+	unsigned int getMissCount() const { return missCount; }
+	unsigned int getAccCount() const { return accCount; }
+
+	unsigned int getNumSets() const { return numSets; }
+	unsigned int getNumWays() const { return numWays; }
+	CacheWay* getWay(int index) const { return pWayArr[index]; }
 
 	// Target functions
-	Block* access_cache(uint32_t address, char operation, unsigned long int accumulatedTime) {
+	bool access(uint32_t address, char operation, unsigned long int curTime) {
 		accCount++;
 
 		// Parsing the address
 		uint32_t blockOffset, setIndex, tag;
-		parseAddress(address, blockSize, numSets, tag, setIndex, blockOffset);
+		parse_address(address, blockSize, numSets, tag, setIndex, blockOffset);
+		cout << "Access: Tag: " << std::bitset<32>(tag) << ", Set Index: " << std::bitset<32>(setIndex) << endl; // WHENDONE: Remove.
 
 		// Searching for the block in the cache
 		for (unsigned int i = 0; i < numWays; i++) {
 			Block &matchingBlock = pWayArr[i]->getBlock(setIndex);
-			if (matchingBlock.isValid() && matchingBlock.getTag() == tag) {
+			if (matchingBlock.valid && matchingBlock.tag == tag) {
 				// Cache Hit
-				matchingBlock.setTimeStamp(accumulatedTime);  // "Touch" block for LRU policy
-				if (operation == 'W') {
+				cout << "Access: Cache hit in way " << i << endl; // WHENDONE: Remove.
+				matchingBlock.timeStamp = curTime;  // "Touch" block for LRU policy
+				if (operation == 'w') {
 					// If write operation, set dirty bit
-					matchingBlock.setDirty(true);
+					matchingBlock.dirty = true;
 				}
-				return &matchingBlock;
+				return true;
 			}
 		}
 
 		// Cache Miss
 		missCount++;
 
-		return nullptr;
+		return false;
 	}
 
-	void fetch_block_into_cache(uint32_t address, unsigned long int accumulatedTime, uint32_t *evictedAddress, bool* dirty = nullptr) {
+	uint32_t fetch_block_into_cache(uint32_t address, unsigned long int curTime, bool dirty, bool* wasDirty = nullptr) {
 		// Parsing the address
 		uint32_t blockOffset, setIndex, tag;
-		parseAddress(address, blockSize, numSets, tag, setIndex, blockOffset);
+		parse_address(address, blockSize, numSets, tag, setIndex, blockOffset);
 		
 		// Looking for a vacant block in ways
 		for (unsigned int i = 0; i < numWays; i++) {
 			Block &matchingBlock = pWayArr[i]->getBlock(setIndex);
-			if (!matchingBlock.isValid()) {
+			if (!matchingBlock.valid) {
+				cout << "Fetch: Placing block in way " << i << endl; // WHENDONE: Remove.
 				// If block is not valid, set it as valid and set the tag
-				matchingBlock.setValid(true);
-				matchingBlock.setTag(tag);
-				matchingBlock.setBlockAddress(address);
-				matchingBlock.setDirty(false);  // Reset dirty bit
-				matchingBlock.setTimeStamp(accumulatedTime);  // "Touch" block for LRU policy
-				return;
+				matchingBlock.valid = true;
+				matchingBlock.tag = tag;
+				matchingBlock.address = address;
+				matchingBlock.dirty = dirty;
+				matchingBlock.timeStamp = curTime;  // "Touch" block for LRU policy
+				return (uint32_t)-1;  // No eviction
 			}
 		}
 		
 		// Conflict miss - need to evict a block
 		// Finding the oldest block in the set as per LRU policy
-		Block &oldestBlock = pWayArr[0]->getBlock(setIndex);
+		/** NOTE: Mistake 3 - The LRU was a refrence, so an attempt to change it resulted in evoking the = operator of the first block instead of pointing to the current block. */
+		Block *LRUBlock = &pWayArr[0]->getBlock(setIndex);
+		unsigned int temp = 0;
 		for (unsigned int i = 1; i < numWays; i++) {
 			Block &matchingBlock = pWayArr[i]->getBlock(setIndex);
-			if (matchingBlock.getTimeStamp() < oldestBlock.getTimeStamp()) {
-				oldestBlock = matchingBlock;
+			if (matchingBlock.timeStamp < LRUBlock->timeStamp) {
+				LRUBlock = &matchingBlock;
+				temp = i;
 			}
 		}
-
-		// Return the evicted address
-		*evictedAddress = oldestBlock.getBlockAddress();
+		cout << "Fetch: Evicting block according to LRU policy from way " << temp << ", and placing new block" << endl; // WHENDONE: Remove.
+		
+		// Remember the evicted address
+		uint32_t evictedAddress = LRUBlock->address;
 
 		// Evicting the oldest block
-		if (oldestBlock.isDirty()) {
+		if ((*wasDirty = LRUBlock->dirty)) {
 			// If the block is dirty, write it back to memory
 			// TODO: Should remain empty?
-			if (dirty != nullptr) {
-				*dirty = true;
-			}
 		}
 
 		// Updating the block with the new data
-		oldestBlock.setTag(tag);
-		oldestBlock.setBlockAddress(address);
-		oldestBlock.setTimeStamp(accumulatedTime);  // "Touch" block for LRU policy
-		oldestBlock.setValid(true);
-		oldestBlock.setDirty(false);  // Reset dirty bit
+		LRUBlock->tag = tag;
+		LRUBlock->address = address;
+		LRUBlock->timeStamp = curTime;  // "Touch" block for LRU policy
+		LRUBlock->valid = true;
+		LRUBlock->dirty = dirty;
+		return evictedAddress;  // Return the evicted address
 	}
 
-	Block* get_block(uint32_t address) {
+	Block* get_block(uint32_t address) const {
 		// Parsing the address
 		uint32_t blockOffset, setIndex, tag;
-		parseAddress(address, blockSize, numSets, tag, setIndex, blockOffset);
+		parse_address(address, blockSize, numSets, tag, setIndex, blockOffset);
 
 		// Searching for the block in the cache
 		for (unsigned int i = 0; i < numWays; i++) {
 			Block &matchingBlock = pWayArr[i]->getBlock(setIndex);
-			if (matchingBlock.isValid() && matchingBlock.getTag() == tag) {
+			if (matchingBlock.valid && matchingBlock.tag == tag) {
 				// Cache Hit
 				return &matchingBlock;
 			}
@@ -307,23 +301,43 @@ public:
 	}
 };
 
+void print_cache_content(Cache *cache) {
+	/**
+	 * Divide each cache to ways presented as numbered columns, and each way will hold all the set blocks as numbered rows. Inside each cell representing block write its tag and in parentheses the step in which it was last "touched" for LRU policy.
+	 */
+	cout << "Cache content:" << endl;
+	for (unsigned int i = 0; i < cache->getNumSets(); i++) {
+		cout << "Set " << i << ": ";
+		for (unsigned int j = 0; j < cache->getNumWays(); j++) {
+			Block &block = cache->getWay(j)->getBlock(i);
+			if (block.valid) {
+				cout << "[" << block.tag << " (" << block.timeStamp << ")] ";
+			} else {
+				cout << "[Empty] ";
+			}
+		}
+		cout << endl;
+	}
+}
+
 // ~ ~ ~ TwoLevelCache class ~ ~ ~
 class TwoLevelCache {
 private:
 	unsigned long int accumulatedTime;
-	unsigned long int accCount;
+	unsigned long int totalAccesses;
 	unsigned int L1AccessTime;
 	unsigned int L2AccessTime;
 	Cache *L1;
 	Cache *L2;
 
 public:
-	TwoLevelCache(unsigned long int L1Size, unsigned long int L1BlockSize, unsigned long int L1Associativity, unsigned int L1AccessTime,
-				  unsigned long int L2Size, unsigned long int L2BlockSize, unsigned long int L2Associativity, unsigned int L2AccessTime) :
-				  accumulatedTime(0), accCount(0), L1AccessTime(L1AccessTime), L2AccessTime(L2AccessTime) {
+	TwoLevelCache(unsigned int blockSize,
+				  unsigned int L1Size, unsigned int L1NumWays, unsigned int L1AccessTime,
+				  unsigned int L2Size, unsigned int L2NumWays, unsigned int L2AccessTime) :
+				  accumulatedTime(0), totalAccesses(0), L1AccessTime(L1AccessTime), L2AccessTime(L2AccessTime) {
 		// Create L1 and L2 caches
-		L1 = new Cache(L1Size, L1BlockSize, L1Associativity);
-		L2 = new Cache(L2Size, L2BlockSize, L2Associativity);
+		L1 = new Cache(L1Size, blockSize, L1NumWays);
+		L2 = new Cache(L2Size, blockSize, L2NumWays);
 	}
 
 	~TwoLevelCache() {
@@ -332,65 +346,78 @@ public:
 	}
 
 	// Getters
-	unsigned long int getAccCount() { return accCount; }
+	unsigned long int getAccCount() { return totalAccesses; }
 	unsigned long int getAccTime() { return accumulatedTime; }
 	Cache* getL1() { return L1; }
 	Cache* getL2() { return L2; }
 
 	// Target functions
-	void access_cache(uint32_t address, char operation) {
-		this->accCount++;
+	void access(uint32_t address, char operation) {
+		this->totalAccesses++;
+		cout << " L1 content: " << endl; // WHENDONE: Remove.
+		print_cache_content(L1); // WHENDONE: Remove.
+		cout << " L2 content: " << endl; // WHENDONE: Remove.
+		print_cache_content(L2); // WHENDONE: Remove.
+		cout << "\n>>> " << totalAccesses << " <<<" << endl; // WHENDONE: Remove.
+		cout << "Accessing address: " << std::bitset<32>(address) << ", Operation: " << operation << ", Current time: " << this->accumulatedTime << endl; // WHENDONE: Remove.
 
 		// Access L1 cache
-		this->accumulatedTime += L1->getAccessTime();
-		if (L1->access_cache(address, operation, this->accumulatedTime)) {
-			// If hit, return
-			return;
+		this->accumulatedTime += L1AccessTime;
+		if (L1->access(address, operation, this->accumulatedTime)) {
+			cout << "L1 Hit" << endl; // WHENDONE: Remove.
+			return; // If hit, return
 		}
+		cout << "L1 Miss" << endl; // WHENDONE: Remove.
 
 		// If miss, access L2 cache
-		this->accumulatedTime += L2->getAccessTime();
-		if (L2->access_cache(address, operation, this->accumulatedTime)) {
-			// If hit, return
+		this->accumulatedTime += L2AccessTime;
+		if (L2->access(address, operation, this->accumulatedTime)) {
+			/** NOTE: Mistake 1 - Forgot to fetch block into L1 after L2 Hit */
+			cout << "L2 Hit , fetching into L1" << endl; // WHENDONE: Remove.
+			// If hit, check if the block should be fetched into L1
+			if (operation == 'r' || gWriteAllocate) {
+				// Fetch the block into L1
+				bool wasDirty = false;
+                uint32_t evictedAddress = L1->fetch_block_into_cache(address, accumulatedTime, operation=='w', &wasDirty);
+				// If a block was evicted from L1 and it was dirty, write it back to L2
+				if (evictedAddress != (uint32_t)-1 && wasDirty) {
+					L2->get_block(evictedAddress)->dirty = true;  // Updating the block in L2
+				}
+			}
 			return;
 		}
 
 		// If miss, access memory
 		this->accumulatedTime += gMemAccessTime;
-
-		/** TODO: Validate
-		 * How to sync the caches and force inclusivity?					By implementing the process from here -> code below
-		 * Should the block be feched to all cache levels?					YES! -> Same as above
-		 * While accessing L2 and L1, should we increment the access time?	Seems like NO -> Creating a new function
-		 * After fetching block from memory should we reaccess L2?			unavoidable, but without incrementing counters -> Same as above.
-		 * Remind me the benefit of inclusivity?
-		 */
-		if (operation == 'R' || gWriteAllocate) {
+		cout << "L2 Miss, performing memory access..." << endl; // WHENDONE: Remove.
+		if (operation == 'r' || gWriteAllocate) {
 			Block *block;
 			
 			// Fetch the block into LLC
-			uint32_t evictedAddress = (uint32_t)-1;
-			L2->fetch_block_into_cache(address, this->accumulatedTime, &evictedAddress);
+			bool wasDirty = false;
+			cout << "Fetching block into L2" << endl; // WHENDONE: Remove.
+			uint32_t evictedAddress = L2->fetch_block_into_cache(address, this->accumulatedTime, operation=='w', &wasDirty);
 
 			// If a block was evicted from L2, invalidate it in L1
 			if (evictedAddress != (uint32_t)-1) {
 				block = L1->get_block(evictedAddress);
 				if (block != nullptr) {
-					block->setValid(false);
+					cout << "Invalidating block in L1 due to eviction from L2" << endl; // WHENDONE: Remove.
+					block->valid = false;
 				}
 			}
 
 			// Fetch the block into L1
-			bool dirty = false;
-			evictedAddress = (uint32_t)-1;
-			L1->fetch_block_into_cache(address, this->accumulatedTime, &evictedAddress, &dirty);
+			wasDirty = false;
+			cout << "Fetching block into L1" << endl; // WHENDONE: Remove.
+			evictedAddress = L1->fetch_block_into_cache(address, this->accumulatedTime, operation=='w', &wasDirty);
 			
 			// If a block was evicted from L1 and it was dirty, write it back to L2
-			if (evictedAddress != (uint32_t)-1 && dirty) {
-				// Updating the block in L2
-				L2->get_block(evictedAddress)->setDirty(true);
+			if (evictedAddress != (uint32_t)-1 && wasDirty) {
+				L2->get_block(evictedAddress)->dirty = true;  // Updating the block in L2
 			}
 		}
+
 	}
 };
 
@@ -398,7 +425,35 @@ public:
  * Main Function
  *****************************************************************************/
 int main(int argc, char **argv) {
+	/**
+	 * Temporary: Editing arguments for testing
+	 */
+	/**
+	 * ./cacheSim example1_trace --mem-cyc 100 --bsize 3 --wr-alloc 1 --l1-size 4 --l1-assoc 1 --l1-cyc 1 --l2-size 6 --l2-assoc 0 --l2-cyc 5
+	 */
+	// argc = 20;
+	// argv[1] = (char*)"examples/example1_trace";
+	// argv[2] = (char*)"--mem-cyc";
+	// argv[3] = (char*)"100";
+	// argv[4] = (char*)"--bsize";
+	// argv[5] = (char*)"3";
+	// argv[6] = (char*)"--wr-alloc";
+	// argv[7] = (char*)"1";
+	// argv[8] = (char*)"--l1-size";
+	// argv[9] = (char*)"4";
+	// argv[10] = (char*)"--l1-assoc";
+	// argv[11] = (char*)"1";
+	// argv[12] = (char*)"--l1-cyc";
+	// argv[13] = (char*)"1";
+	// argv[14] = (char*)"--l2-size";
+	// argv[15] = (char*)"6";
+	// argv[16] = (char*)"--l2-assoc";
+	// argv[17] = (char*)"0";
+	// argv[18] = (char*)"--l2-cyc";
+	// argv[19] = (char*)"5";
+	// --------------- Remove the above lines when done testing ---------------
 
+	// Check if enough arguments are provided
 	if (argc < 19) {
 		cerr << "Not enough arguments" << endl;
 		return 0;
@@ -452,8 +507,13 @@ int main(int argc, char **argv) {
 	gWriteAllocate = WrAlloc;
 
 	// Creating the caches
-	TwoLevelCache cache(L1Size, BSize, L1Assoc, L1Cyc,
-						L2Size, BSize, L2Assoc, L2Cyc);
+	unsigned blockSize = 1u << BSize;
+    unsigned L1S = 1u << L1Size;
+	unsigned L1numWays = 1u << L1Assoc;
+    unsigned L2S = 1u << L2Size;
+	unsigned L2numWays = 1u << L2Assoc;
+
+    TwoLevelCache cache(blockSize, L1S, L1numWays, L1Cyc, L2S, L2numWays, L2Cyc);
 
 	// Executing input lines
 	while (getline(file, line)) {
@@ -466,26 +526,26 @@ int main(int argc, char **argv) {
 			return 0;
 		}
 
-		// DEBUG - remove this line
-		cout << "operation: " << operation;
+		// // DEBUG - remove this line
+		// cout << "operation: " << operation;
 
 		string cutAddress = address.substr(2); // Removing the "0x" part of the address
 
-		// DEBUG - remove this line
-		cout << ", address (hex)" << cutAddress;
+		// // DEBUG - remove this line
+		// cout << ", address (hex)" << cutAddress;
 
 		unsigned long int num = 0;
 		num = strtoul(cutAddress.c_str(), NULL, 16);
 
-		// DEBUG - remove this line
-		cout << " (dec) " << num << endl;
+		// // DEBUG - remove this line
+		// cout << " (dec) " << num << endl;
 		
 		uint32_t binAddress = dec_to_bin(num);
-		// DEBUG - remove this line
-		cout << "Address in binary: " << binAddress << endl;
+		// // DEBUG - remove this line
+		// cout << "Address in binary: " << std::bitset<32>(binAddress) << endl;
 
 		// Accessing the cache
-		cache.access_cache(binAddress, operation);
+		cache.access(binAddress, operation);
 	}
 
 	double L1MissRate = (double)cache.getL1()->getMissCount() / (double)cache.getL1()->getAccCount();
@@ -503,33 +563,59 @@ int main(int argc, char **argv) {
  * Test Functions
  *****************************************************************************/
 void test_parseAddress() {
-	cout << "Testing parseAddress function..." << endl;
 	uint32_t address = 0x12345678;
 	unsigned int blockSize = 16;
 	unsigned int numSets = 4;
 	uint32_t tag, setIndex, blockOffset;
-
-	parseAddress(address, blockSize, numSets, tag, setIndex, blockOffset);
+	
+	cout << "Testing parse_address function..." << endl;
 	cout << "\tAddress: " << std::bitset<32>(address) << endl;
 	cout << "\tBlock Size: " << blockSize << endl;
 	cout << "\tNumber of Sets: " << numSets << endl;
+	parse_address(address, blockSize, numSets, tag, setIndex, blockOffset);
 	cout << "Parsed Address:" << endl;
 	cout << "\tTag: " << std::bitset<32>(tag) << endl;
 	cout << "\tSet Index: " << std::bitset<32>(setIndex) << endl;
 	cout << "\tBlock Offset: " << std::bitset<32>(blockOffset) << endl;
 }
 
+void test_dec_to_bin() {
+	unsigned int dec = 100;
+	cout << "Decimal: " << dec << " to Binary: " << std::bitset<32>(dec) << endl;
+	dec = 255;
+	cout << "Decimal: " << dec << " to Binary: " << std::bitset<32>(dec) << endl;
+	dec = 1024;
+	cout << "Decimal: " << dec << " to Binary: " << std::bitset<32>(dec) << endl;	
+}
+
+// void test_get_bits() {
+// 	// cout << "get_bits(0b11111111, 0, 7) = " << bitset<8>(get_bits(0b11111111, 0, 7)) << endl;
+// 	// cout << "get_bits(0b11111111, 1, 6) = " << bitset<8>(get_bits(0b11111111, 1, 6)) << endl;
+// 	// cout << "get_bits(0b11111111, 2, 5) = " << bitset<8>(get_bits(0b11111111, 2, 5)) << endl;
+// 	// cout << "get_bits(0b11111111, 3, 4) = " << bitset<8>(get_bits(0b11111111, 3, 4)) << endl;
+// 	// cout << "get_bits(0b11111111, 4, 3) = " << bitset<8>(get_bits(0b11111111, 4, 3)) << endl;
+// 	// cout << "get_bits(0b11001100, 4, 4) = " << bitset<8>(get_bits(0b11001100, 4, 4)) << endl;
+// 	// cout << "get_bits(0b11001100, 3, 3) = " << bitset<8>(get_bits(0b11001100, 3, 3)) << endl;
+// 	cout << "get_bits(0b11001100, 2, 6) = " << bitset<8>(get_bits(0b11001100, 2, 6)) << endl;
+// 	cout << "get_bits(0b11001100, 2, 7) = " << bitset<8>(get_bits(0b11001100, 2, 7)) << endl;
+// 	cout << "get_bits(0b11001100, 0, 4) = " << bitset<8>(get_bits(0b11001100, 0, 4)) << endl;
+// 	cout << "get_bits(0b11001100, 0, 3) = " << bitset<8>(get_bits(0b11001100, 0, 3)) << endl;
+// 	cout << "get_bits(0b11001100, 1, 4) = " << bitset<8>(get_bits(0b11001100, 1, 4)) << endl;
+// }
+
 /******************************************************************************
  * Temporary Main Function for Testing
  *****************************************************************************/
 int _main() {
-	test_parseAddress();
-
+	// test_parseAddress();
+	// test_dec_to_bin();
+	// test_get_bits();
+	// cout << bitset<32>((uint32_t)-1) << endl;
 	return 0;
 }
 
 /* Output:
-Testing parseAddress function...
+Testing parse_address function...
         Address: 00010010001101000101011001111000
         Block Size: 16
         Number of Sets: 4
