@@ -49,60 +49,28 @@ inline unsigned int log2_u(unsigned int x) {
 	return log;
 }
 
-// int power(int base, int exp) {
-// 	int result = 1;
-// 	for (int i = 0; i < exp; ++i) {
-// 		result *= base;
-// 	}
-// 	return result;
-// }
-
 uint32_t dec_to_bin(uint32_t dec) {
     // This function is not needed for address handling, but if you want a binary representation as an integer,
     // it will only work for small numbers. For display, use std::bitset instead.
     return dec; // Just return the value, as bitwise operations work on the integer itself.
 }
 
-/** Deprecated
- * This function is not used in the code, but it was part of the original code.
- * It is kept here for reference, but it is not needed for the current implementation.
- 
-uint32_t _get_bits(uint32_t value, unsigned start, unsigned end) {
-	// Get bits from start to end (inclusive)
-	if (start > end || start < 0 || end >= 32) {
-		// cerr << "Error: get_bits recieved an invalid bit range" << endl;
+inline uint32_t get_bits(uint32_t v, unsigned lo, unsigned hi) {
+	if (lo > hi || lo < 0 || hi >= 32) {
+		// cerr << "Error: get_bits received an invalid bit range" << endl;
 		return 0;
 	}
-	uint32_t mask;
-	mask = (1u << (end - start + 1u)) - 1u;
-	mask = mask << start;
-
-	return (value & mask) >> start;
-}
-*/
-
-inline uint32_t get_bits(uint32_t v, unsigned lo, unsigned hi) {
     uint32_t mask = ((uint64_t)1 << (hi - lo + 1)) - 1;
     return (v >> lo) & mask;
 }
 
 int parse_address(uint32_t address, unsigned int blockSize, unsigned int numSets,
 				 uint32_t &tag, uint32_t &setIndex, uint32_t &blockOffset) {
-	
 	/** Address Structure:
 	 * [<log2(blockSize)-1> .. 0]									: Block offset
 	 * [<log2(blockSize)+log2(numSets)-1 .. <log2(blockSize)>]		: Set index
 	 * [31 .. <log2(blockSize)+log2(numSets)-1>]					: Tag
 	 */
-
-	/** NOTE: Mistake 2 - the original code falsey assumed that the 00 prefix is not part of the block offset. */
-	/** Address Structure:
-	 * [1 .. 0]															: 00 !!!!!!!!!!!!!!!!!!!!!!!!!
-	 * [<2+log2(blockSize)-1> .. 2]										: Block offset
-	 * [<2+log2(blockSize)+log2(numSets)-1 .. <2+log2(blockSize)>]		: Set index
-	 * [31 .. <2+log2(blockSize)+log2(numSets)-1>]						: Tag
-	 */
-	
 	unsigned leftIdxOffset = log2_u(blockSize) - 1;
 	unsigned leftIdxSets = leftIdxOffset + log2_u(numSets);
 	unsigned leftIdxTag = 31;
@@ -208,14 +176,14 @@ public:
 		// Parsing the address
 		uint32_t blockOffset, setIndex, tag;
 		parse_address(address, blockSize, numSets, tag, setIndex, blockOffset);
-		cout << "Access: Tag: " << std::bitset<32>(tag) << ", Set Index: " << std::bitset<32>(setIndex) << endl; // WHENDONE: Remove.
+		// cout << "Access: Tag: " << std::bitset<32>(tag) << ", Set Index: " << std::bitset<32>(setIndex) << endl; // WHENDONE: Remove.
 
 		// Searching for the block in the cache
 		for (unsigned int i = 0; i < numWays; i++) {
 			Block &matchingBlock = pWayArr[i]->getBlock(setIndex);
 			if (matchingBlock.valid && matchingBlock.tag == tag) {
 				// Cache Hit
-				cout << "Access: Cache hit in way " << i << endl; // WHENDONE: Remove.
+				// cout << "Access: Cache hit in way " << i << endl; // WHENDONE: Remove.
 				matchingBlock.timeStamp = curTime;  // "Touch" block for LRU policy
 				if (operation == 'w') {
 					// If write operation, set dirty bit
@@ -240,7 +208,7 @@ public:
 		for (unsigned int i = 0; i < numWays; i++) {
 			Block &matchingBlock = pWayArr[i]->getBlock(setIndex);
 			if (!matchingBlock.valid) {
-				cout << "Fetch: Placing block in way " << i << endl; // WHENDONE: Remove.
+				// cout << "Fetch: Placing block in way " << i << endl; // WHENDONE: Remove.
 				// If block is not valid, set it as valid and set the tag
 				matchingBlock.valid = true;
 				matchingBlock.tag = tag;
@@ -253,17 +221,16 @@ public:
 		
 		// Conflict miss - need to evict a block
 		// Finding the oldest block in the set as per LRU policy
-		/** NOTE: Mistake 3 - The LRU was a refrence, so an attempt to change it resulted in evoking the = operator of the first block instead of pointing to the current block. */
 		Block *LRUBlock = &pWayArr[0]->getBlock(setIndex);
-		unsigned int temp = 0;
+		// unsigned int temp = 0;
 		for (unsigned int i = 1; i < numWays; i++) {
 			Block &matchingBlock = pWayArr[i]->getBlock(setIndex);
 			if (matchingBlock.timeStamp < LRUBlock->timeStamp) {
 				LRUBlock = &matchingBlock;
-				temp = i;
+				// temp = i;
 			}
 		}
-		cout << "Fetch: Evicting block according to LRU policy from way " << temp << ", and placing new block" << endl; // WHENDONE: Remove.
+		// cout << "Fetch: Evicting block according to LRU policy from way " << temp << ", and placing new block" << endl; // WHENDONE: Remove.
 		
 		// Remember the evicted address
 		uint32_t evictedAddress = LRUBlock->address;
@@ -283,7 +250,7 @@ public:
 		return evictedAddress;  // Return the evicted address
 	}
 
-	Block* get_block(uint32_t address) const {
+	Block* get_block(uint32_t address, unsigned long int curTime) const {
 		// Parsing the address
 		uint32_t blockOffset, setIndex, tag;
 		parse_address(address, blockSize, numSets, tag, setIndex, blockOffset);
@@ -293,6 +260,7 @@ public:
 			Block &matchingBlock = pWayArr[i]->getBlock(setIndex);
 			if (matchingBlock.valid && matchingBlock.tag == tag) {
 				// Cache Hit
+				matchingBlock.timeStamp = curTime;  // "Touch" block for LRU policy
 				return &matchingBlock;
 			}
 		}
@@ -303,7 +271,8 @@ public:
 
 void print_cache_content(Cache *cache) {
 	/**
-	 * Divide each cache to ways presented as numbered columns, and each way will hold all the set blocks as numbered rows. Inside each cell representing block write its tag and in parentheses the step in which it was last "touched" for LRU policy.
+	 * Divide each cache to ways presented as numbered columns, and each way will hold all the set blocks as numbered rows.
+	 * Inside each cell representing block write its tag and in parentheses the step in which it was last "touched" for LRU policy.
 	 */
 	cout << "Cache content:" << endl;
 	for (unsigned int i = 0; i < cache->getNumSets(); i++) {
@@ -354,26 +323,25 @@ public:
 	// Target functions
 	void access(uint32_t address, char operation) {
 		this->totalAccesses++;
-		cout << " L1 content: " << endl; // WHENDONE: Remove.
-		print_cache_content(L1); // WHENDONE: Remove.
-		cout << " L2 content: " << endl; // WHENDONE: Remove.
-		print_cache_content(L2); // WHENDONE: Remove.
-		cout << "\n>>> " << totalAccesses << " <<<" << endl; // WHENDONE: Remove.
-		cout << "Accessing address: " << std::bitset<32>(address) << ", Operation: " << operation << ", Current time: " << this->accumulatedTime << endl; // WHENDONE: Remove.
+		// cout << " L1 content: " << endl; // WHENDONE: Remove.
+		// print_cache_content(L1); // WHENDONE: Remove.
+		// cout << " L2 content: " << endl; // WHENDONE: Remove.
+		// print_cache_content(L2); // WHENDONE: Remove.
+		// cout << "\n>>> " << totalAccesses << " <<<" << endl; // WHENDONE: Remove.
+		// cout << "Accessing address: " << std::bitset<32>(address) << ", Operation: " << operation << ", Current time: " << this->accumulatedTime << endl; // WHENDONE: Remove.
 
 		// Access L1 cache
 		this->accumulatedTime += L1AccessTime;
 		if (L1->access(address, operation, this->accumulatedTime)) {
-			cout << "L1 Hit" << endl; // WHENDONE: Remove.
+			// cout << "L1 Hit" << endl; // WHENDONE: Remove.
 			return; // If hit, return
 		}
-		cout << "L1 Miss" << endl; // WHENDONE: Remove.
+		// cout << "L1 Miss" << endl; // WHENDONE: Remove.
 
 		// If miss, access L2 cache
 		this->accumulatedTime += L2AccessTime;
 		if (L2->access(address, operation, this->accumulatedTime)) {
-			/** NOTE: Mistake 1 - Forgot to fetch block into L1 after L2 Hit */
-			cout << "L2 Hit , fetching into L1" << endl; // WHENDONE: Remove.
+			// cout << "L2 Hit , fetching into L1" << endl; // WHENDONE: Remove.
 			// If hit, check if the block should be fetched into L1
 			if (operation == 'r' || gWriteAllocate) {
 				// Fetch the block into L1
@@ -381,7 +349,7 @@ public:
                 uint32_t evictedAddress = L1->fetch_block_into_cache(address, accumulatedTime, operation=='w', &wasDirty);
 				// If a block was evicted from L1 and it was dirty, write it back to L2
 				if (evictedAddress != (uint32_t)-1 && wasDirty) {
-					L2->get_block(evictedAddress)->dirty = true;  // Updating the block in L2
+					L2->get_block(evictedAddress, this->accumulatedTime)->dirty = true;  // Updating the block in L2
 				}
 			}
 			return;
@@ -389,32 +357,32 @@ public:
 
 		// If miss, access memory
 		this->accumulatedTime += gMemAccessTime;
-		cout << "L2 Miss, performing memory access..." << endl; // WHENDONE: Remove.
+		// cout << "L2 Miss, performing memory access..." << endl; // WHENDONE: Remove.
 		if (operation == 'r' || gWriteAllocate) {
 			Block *block;
 			
 			// Fetch the block into LLC
 			bool wasDirty = false;
-			cout << "Fetching block into L2" << endl; // WHENDONE: Remove.
+			// cout << "Fetching block into L2" << endl; // WHENDONE: Remove.
 			uint32_t evictedAddress = L2->fetch_block_into_cache(address, this->accumulatedTime, operation=='w', &wasDirty);
 
 			// If a block was evicted from L2, invalidate it in L1
 			if (evictedAddress != (uint32_t)-1) {
-				block = L1->get_block(evictedAddress);
+				block = L1->get_block(evictedAddress, this->accumulatedTime);
 				if (block != nullptr) {
-					cout << "Invalidating block in L1 due to eviction from L2" << endl; // WHENDONE: Remove.
+					// cout << "Invalidating block in L1 due to eviction from L2" << endl; // WHENDONE: Remove.
 					block->valid = false;
 				}
 			}
 
 			// Fetch the block into L1
 			wasDirty = false;
-			cout << "Fetching block into L1" << endl; // WHENDONE: Remove.
+			// cout << "Fetching block into L1" << endl; // WHENDONE: Remove.
 			evictedAddress = L1->fetch_block_into_cache(address, this->accumulatedTime, operation=='w', &wasDirty);
 			
 			// If a block was evicted from L1 and it was dirty, write it back to L2
 			if (evictedAddress != (uint32_t)-1 && wasDirty) {
-				L2->get_block(evictedAddress)->dirty = true;  // Updating the block in L2
+				L2->get_block(evictedAddress, this->accumulatedTime)->dirty = true;  // Updating the block in L2
 			}
 		}
 
@@ -588,39 +556,15 @@ void test_dec_to_bin() {
 	cout << "Decimal: " << dec << " to Binary: " << std::bitset<32>(dec) << endl;	
 }
 
-// void test_get_bits() {
-// 	// cout << "get_bits(0b11111111, 0, 7) = " << bitset<8>(get_bits(0b11111111, 0, 7)) << endl;
-// 	// cout << "get_bits(0b11111111, 1, 6) = " << bitset<8>(get_bits(0b11111111, 1, 6)) << endl;
-// 	// cout << "get_bits(0b11111111, 2, 5) = " << bitset<8>(get_bits(0b11111111, 2, 5)) << endl;
-// 	// cout << "get_bits(0b11111111, 3, 4) = " << bitset<8>(get_bits(0b11111111, 3, 4)) << endl;
-// 	// cout << "get_bits(0b11111111, 4, 3) = " << bitset<8>(get_bits(0b11111111, 4, 3)) << endl;
-// 	// cout << "get_bits(0b11001100, 4, 4) = " << bitset<8>(get_bits(0b11001100, 4, 4)) << endl;
-// 	// cout << "get_bits(0b11001100, 3, 3) = " << bitset<8>(get_bits(0b11001100, 3, 3)) << endl;
-// 	cout << "get_bits(0b11001100, 2, 6) = " << bitset<8>(get_bits(0b11001100, 2, 6)) << endl;
-// 	cout << "get_bits(0b11001100, 2, 7) = " << bitset<8>(get_bits(0b11001100, 2, 7)) << endl;
-// 	cout << "get_bits(0b11001100, 0, 4) = " << bitset<8>(get_bits(0b11001100, 0, 4)) << endl;
-// 	cout << "get_bits(0b11001100, 0, 3) = " << bitset<8>(get_bits(0b11001100, 0, 3)) << endl;
-// 	cout << "get_bits(0b11001100, 1, 4) = " << bitset<8>(get_bits(0b11001100, 1, 4)) << endl;
-// }
-
 /******************************************************************************
  * Temporary Main Function for Testing
  *****************************************************************************/
 int _main() {
 	// test_parseAddress();
 	// test_dec_to_bin();
-	// test_get_bits();
-	// cout << bitset<32>((uint32_t)-1) << endl;
 	return 0;
 }
 
 /* Output:
-Testing parse_address function...
-        Address: 00010010001101000101011001111000
-        Block Size: 16
-        Number of Sets: 4
-Parsed Address:
-        Tag: 00000000000100100011010001010110
-        Set Index: 00000000000000000000000000000001
-        Block Offset: 00000000000000000000000000001110
+
 */
