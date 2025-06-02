@@ -1,45 +1,23 @@
-// {
-//     // Use IntelliSense to learn about possible attributes.
-//     // Hover to view descriptions of existing attributes.
-//     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
-//     "version": "0.2.0",
-//     "configurations": [
-//         {
-//             "name": "(gdb) Launch",
-//             "type": "cppdbg",
-//             "request": "launch",
-//             "program": "${workspaceFolder}/cacheSim",
-//             "args": [],
-//             "stopAtEntry": false,
-//             "cwd": "${fileDirname}",
-//             "environment": [],
-//             "externalConsole": false,
-//             "MIMode": "gdb",
-//             "setupCommands": [
-//                 {
-//                     "description": "Enable pretty-printing for gdb",
-//                     "text": "-enable-pretty-printing",
-//                     "ignoreFailures": true
-//                 },
-//                 {
-//                     "description": "Set Disassembly Flavor to Intel",
-//                     "text": "-gdb-set disassembly-flavor intel",
-//                     "ignoreFailures": true
-//                 }
-//             ]
-//         }
-
-//     ]
-// }
 {
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug cacheSim",
+            "name": "Debug cacheSim 1st example",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/cacheSim",
-            "args": [],
+            "args": [
+                "examples/example1_trace",
+                "--mem-cyc", "100",
+                "--bsize", "3",
+                "--wr-alloc", "1",
+                "--l1-size", "4",
+                "--l1-assoc", "1",
+                "--l1-cyc", "1",
+                "--l2-size", "6",
+                "--l2-assoc", "0",
+                "--l2-cyc", "5"
+            ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
@@ -56,21 +34,3 @@
         }
     ]
 }
-// // .vscode/launch.json
-// {
-//     "version": "0.2.0",
-//     "configurations": [
-//         {
-//             "name": "Debug cacheSim",
-//             "type": "cppdbg",
-//             "request": "launch",
-//             "program": "${workspaceFolder}/cacheSim",
-//             "args": ["examples/example1_trc"],
-//             "stopAtEntry": false,
-//             "cwd": "${workspaceFolder}",
-//             "environment": [],
-//             "externalConsole": false,
-//             "MIMode": "gdb"
-//         }
-//     ]
-// }

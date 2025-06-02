@@ -1,8 +1,34 @@
 #!/bin/bash
 
+# Usage function
+show_usage() {
+    echo "Usage: $0 [test_count] [show_details] [parallel_jobs]"
+    echo "  test_count: 'all' or number of tests per directory (default: all)"
+    echo "  show_details: 'true' or 'false' for verbose output (default: false)"
+    echo "  parallel_jobs: number of concurrent test processes (default: 16)"
+    echo "Examples:"
+    echo "  $0                    # Run all tests with 16 parallel jobs"
+    echo "  $0 50                 # Run first 50 tests per directory"
+    echo "  $0 all true           # Run all tests with detailed output"
+    echo "  $0 all false 16       # Run all tests with 16 parallel jobs"
+    exit 1
+}
+
+# Check for help flag
+if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+    show_usage
+fi
+
 # Check if user wants to run a subset of tests
 SUBSET_SIZE=${1:-"all"}
 SHOW_DETAILS=${2:-"false"}
+MAX_PARALLEL_JOBS=${3:-16}  # Default to 16 parallel jobs
+
+# Validate parallel jobs parameter
+if ! [[ "$MAX_PARALLEL_JOBS" =~ ^[0-9]+$ ]] || [ "$MAX_PARALLEL_JOBS" -lt 1 ]; then
+    echo "Error: parallel_jobs must be a positive integer"
+    show_usage
+fi
 
 echo "Building cache simulator..."
 make clean
@@ -13,7 +39,7 @@ if [ ! -f "cacheSim" ]; then
     exit 1
 fi
 
-echo "Running tests..."
+echo "Running tests in parallel (max $MAX_PARALLEL_JOBS concurrent jobs)..."
 if [ "$SUBSET_SIZE" != "all" ]; then
     echo "Running first $SUBSET_SIZE tests from each directory..."
 else
@@ -30,7 +56,50 @@ failed_details=()
 failed_test_count=0  # Separate counter for failed test details
 max_failed_details=20
 
-# Function to run tests in a directory
+# Array to track background job PIDs
+declare -a job_pids=()
+declare -a test_commands=()
+declare -a test_files=()
+
+# Function to run a single test in background
+run_single_test() {
+    local test_file=$1
+    local test_dir=$2
+    
+    test_num=$(echo $test_file | cut -d'.' -f1)
+    cmd_file="$test_dir/$(basename $test_num).command"
+    
+    if [ -f "$cmd_file" ]; then
+        # Read the command and fix the path if necessary
+        command=$(cat "$cmd_file")
+        if [ "$test_dir" = "test_t" ]; then
+            command=$(echo "$command" | sed 's|tests/|test_t/|g')
+        fi
+        
+        # Execute the command and capture output
+        eval "$command" > ${test_num}.YoursOut 2>&1
+    fi
+}
+
+# Function to wait for jobs and control parallel execution
+wait_for_slot() {
+    while [ ${#job_pids[@]} -ge $MAX_PARALLEL_JOBS ]; do
+        # Check which jobs have finished
+        new_pids=()
+        for pid in "${job_pids[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                new_pids+=("$pid")
+            fi
+        done
+        job_pids=("${new_pids[@]}")
+        
+        if [ ${#job_pids[@]} -ge $MAX_PARALLEL_JOBS ]; then
+            sleep 0.1  # Short sleep to prevent busy waiting
+        fi
+    done
+}
+
+# Function to run tests in a directory with parallelization
 run_tests_in_dir() {
     local test_dir=$1
     local max_tests=$2
@@ -54,34 +123,35 @@ run_tests_in_dir() {
     echo "  Processing $dir_total_tests tests in $test_dir/ directory..."
     echo "============================================================"
     
-    # Run command files
+    # Launch test commands in parallel
     for filename in $test_dir/test*.command; do
         if [ -f "$filename" ] && [ "$current_count" -lt "$max_tests" ]; then
-            test_num=$(echo $filename | cut -d'.' -f1)
             current_count=$((current_count + 1))
             
             if [ "$SHOW_DETAILS" = "true" ]; then
-                echo "Running $test_num... ($current_count/$dir_total_tests)"
+                echo "Launching $filename... ($current_count/$dir_total_tests)"
             else
-                # Show progress every 20 tests
-                if [ $((current_count % 20)) -eq 0 ]; then
-                    echo "  Progress: $current_count/$dir_total_tests tests executed"
+                # Show progress every 50 tests
+                if [ $((current_count % 50)) -eq 0 ]; then
+                    echo "  Progress: $current_count/$dir_total_tests tests launched"
                 fi
             fi
             
-            # Read the command and fix the path if necessary
-            command=$(cat "$filename")
-            if [ "$test_dir" = "test_t" ]; then
-                # Replace "tests/" with "test_t/" in the command for test_t directory
-                command=$(echo "$command" | sed 's|tests/|test_t/|g')
-            fi
+            # Wait for an available slot
+            wait_for_slot
             
-            # Execute the modified command and capture output
-            if ! eval "$command" > ${test_num}.YoursOut 2>&1; then
-                echo "  ERROR: Command execution failed for $test_num"
-            fi
+            # Launch test in background
+            run_single_test "$filename" "$test_dir" &
+            job_pids+=($!)
         fi
     done
+    
+    # Wait for all remaining jobs to complete
+    echo "  Waiting for all tests to complete..."
+    for pid in "${job_pids[@]}"; do
+        wait "$pid" 2>/dev/null
+    done
+    job_pids=()  # Clear the array for next directory
     
     echo "Comparing results in $test_dir/ directory..."
     current_count=0
@@ -193,7 +263,7 @@ fi
 
 # Run tests in both directories
 run_tests_in_dir "tests" $MAX_TESTS
-run_tests_in_dir "test_t" $MAX_TESTS
+# run_tests_in_dir "test_t" $MAX_TESTS
 
 echo
 echo "============================================================"

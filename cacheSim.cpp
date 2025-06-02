@@ -1,5 +1,5 @@
 /* 046267 Computer Architecture - HW #2                                      */
-/* Athors: Shaked Yitzhak - 322704776, Idan Simon - 207784653		         */
+/* Athors: Shaked Yitzhak - 322704776, Idan Simon - 207784653				 */
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Cashe Simulator ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /******************************************************************************
  * Includes
@@ -30,8 +30,8 @@ using std::bitset;
  /******************************************************************************
  * Global Variables
  *****************************************************************************/
-unsigned int gMemAccessTime = -1;  // Memory access time
-bool gWriteAllocate = false;  	  // Write-Allocate mode
+unsigned int gMemAccessTime = -1;		// Memory access time
+bool gWriteAllocate 		= false;  	// Write-Allocate mode
 
 /******************************************************************************
  * Declarations
@@ -50,8 +50,6 @@ inline unsigned int log2_u(unsigned int x) {
 }
 
 uint32_t dec_to_bin(uint32_t dec) {
-    // This function is not needed for address handling, but if you want a binary representation as an integer,
-    // it will only work for small numbers. For display, use std::bitset instead.
     return dec; // Just return the value, as bitwise operations work on the integer itself.
 }
 
@@ -88,7 +86,7 @@ int parse_address(uint32_t address, unsigned int blockSize, unsigned int numSets
 		return 0;
 	}
 	
-	// blockOffset = get_bits(address, 2, leftIdxOffset);
+	blockOffset = get_bits(address, 0, leftIdxOffset);
 	setIndex = get_bits(address, leftIdxOffset + 1, leftIdxSets);
 	tag = get_bits(address, leftIdxSets + 1, leftIdxTag);
 
@@ -393,34 +391,6 @@ public:
  * Main Function
  *****************************************************************************/
 int main(int argc, char **argv) {
-	/**
-	 * Temporary: Editing arguments for testing
-	 */
-	/**
-	 * ./cacheSim example1_trace --mem-cyc 100 --bsize 3 --wr-alloc 1 --l1-size 4 --l1-assoc 1 --l1-cyc 1 --l2-size 6 --l2-assoc 0 --l2-cyc 5
-	 */
-	// argc = 20;
-	// argv[1] = (char*)"examples/example1_trace";
-	// argv[2] = (char*)"--mem-cyc";
-	// argv[3] = (char*)"100";
-	// argv[4] = (char*)"--bsize";
-	// argv[5] = (char*)"3";
-	// argv[6] = (char*)"--wr-alloc";
-	// argv[7] = (char*)"1";
-	// argv[8] = (char*)"--l1-size";
-	// argv[9] = (char*)"4";
-	// argv[10] = (char*)"--l1-assoc";
-	// argv[11] = (char*)"1";
-	// argv[12] = (char*)"--l1-cyc";
-	// argv[13] = (char*)"1";
-	// argv[14] = (char*)"--l2-size";
-	// argv[15] = (char*)"6";
-	// argv[16] = (char*)"--l2-assoc";
-	// argv[17] = (char*)"0";
-	// argv[18] = (char*)"--l2-cyc";
-	// argv[19] = (char*)"5";
-	// --------------- Remove the above lines when done testing ---------------
-
 	// Check if enough arguments are provided
 	if (argc < 19) {
 		cerr << "Not enough arguments" << endl;
@@ -494,31 +464,34 @@ int main(int argc, char **argv) {
 			return 0;
 		}
 
-		// // DEBUG - remove this line
-		// cout << "operation: " << operation;
-
+		// Parsing the operation
 		string cutAddress = address.substr(2); // Removing the "0x" part of the address
-
-		// // DEBUG - remove this line
-		// cout << ", address (hex)" << cutAddress;
-
 		unsigned long int num = 0;
 		num = strtoul(cutAddress.c_str(), NULL, 16);
-
-		// // DEBUG - remove this line
-		// cout << " (dec) " << num << endl;
-		
 		uint32_t binAddress = dec_to_bin(num);
-		// // DEBUG - remove this line
-		// cout << "Address in binary: " << std::bitset<32>(binAddress) << endl;
 
 		// Accessing the cache
 		cache.access(binAddress, operation);
 	}
-
+	// Round to 3 decimal places with custom rounding logic
 	double L1MissRate = (double)cache.getL1()->getMissCount() / (double)cache.getL1()->getAccCount();
 	double L2MissRate = (double)cache.getL2()->getMissCount() / (double)cache.getL2()->getAccCount();
 	double avgAccTime = (double)cache.getAccTime() / (double)cache.getAccCount();
+
+	// // Custom rounding function: round up if 4th digit > 5, down if <= 5
+	// auto customRound = [](double value) -> double {
+	// 	double shifted = value * 1000.0;  // Shift 3 decimal places
+	// 	double fractional = shifted - (int)shifted;
+	// 	if (fractional > 0.5) {
+	// 		return (int)(shifted + 1) / 1000.0;
+	// 	} else {
+	// 		return (int)shifted / 1000.0;
+	// 	}
+	// };
+
+	// L1MissRate = customRound(L1MissRate);
+	// L2MissRate = customRound(L2MissRate);
+	// avgAccTime = customRound(avgAccTime);
 
 	printf("L1miss=%.03f ", L1MissRate);
 	printf("L2miss=%.03f ", L2MissRate);
