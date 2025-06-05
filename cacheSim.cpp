@@ -362,7 +362,7 @@ public:
 			// Fetch the block into LLC
 			bool wasDirty = false;
 			// cout << "Fetching block into L2" << endl; // WHENDONE: Remove.
-			uint32_t evictedAddress = L2->fetch_block_into_cache(address, this->accumulatedTime, operation=='w', &wasDirty);
+			uint32_t evictedAddress = L2->fetch_block_into_cache(address, this->accumulatedTime, false, &wasDirty);
 
 			// If a block was evicted from L2, invalidate it in L1
 			if (evictedAddress != (uint32_t)-1) {
